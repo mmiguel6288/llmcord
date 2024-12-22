@@ -66,6 +66,8 @@ class MsgNode:
 
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
+    username: Optional[str] = None
+
 
 @discord_client.event
 async def on_message(new_msg):
@@ -89,9 +91,12 @@ async def on_message(new_msg):
     ):
         return
 
-    provider, model = cfg["model"].split("/", 1)
-    base_url = cfg["providers"][provider]["base_url"]
-    api_key = cfg["providers"][provider].get("api_key", "sk-no-key-required")
+    provider, model = resolve_config_user(new_msg,cfg["model"])[0].split("/",1)
+
+    provider_cfg = resolve_config_user(new_msg,cfg["providers"])[0]
+
+    base_url = provider_cfg[provider]["base_url"]
+    api_key = provider_cfg[provider].get("api_key", "sk-no-key-required")
     openai_client = AsyncOpenAI(base_url=base_url, api_key=api_key)
 
     accept_images: bool = any(x in model.lower() for x in VISION_MODEL_TAGS)
@@ -134,6 +139,8 @@ async def on_message(new_msg):
 
                 curr_node.has_bad_attachments = len(curr_msg.attachments) > sum(len(att_list) for att_list in good_attachments.values())
 
+                curr_node.username = curr_msg.author.username
+
                 try:
                     if (
                         curr_msg.reference == None
@@ -164,6 +171,13 @@ async def on_message(new_msg):
                 message = dict(content=content, role=curr_node.role)
                 if accept_usernames and curr_node.user_id != None:
                     message["name"] = str(curr_node.user_id)
+                elif curr_node.user_id != None:
+                    message['text'] = curr_node.username+':\n'+message['text']
+
+
+
+
+
 
                 messages.append(message)
 
@@ -180,20 +194,13 @@ async def on_message(new_msg):
 
     logging.info(f"Message received (user ID: {new_msg.author.id}, attachments: {len(new_msg.attachments)}, conversation length: {len(messages)}):\n{new_msg.content}")
 
-
-    # if the channel has a channel-specific prompt, then use that, otherwise use the category-specific prompt if it exists, otherwise use the default system prompt
-    # note: If the user creates a thread in the channel, then new_msg.channel.parent_id will reflect the overall channel ID 
-    channel = new_msg.channel
-    channel_id = channel.id
-    parent_channel_id = getattr(new_msg.channel,'parent_id',None)
-    category_id = getattr(new_msg.channel, 'category_id', None)
-    system_prompts = cfg.get('system_prompts',{})
-    system_prompt = (
-            system_prompts.get(channel_id) or
-            system_prompts.get(parent_channel_id) or
-            system_prompts.get(category_id) or
-            system_prompts.get('default')
-            )
+    system_prompt = resolve_config_location(new_msg,cfg.get('system_prompts',{}))
+    if system_prompt:
+        system_prompt = [system_prompt]
+    else:
+        system_prompt = []
+    system_prompt.extend(resolve_config_user(new_msg,cfg.get('system_prompts',{})))
+    system_prompt = '\n'.join(system_prompt).strip()
 
     if system_prompt:
         system_prompt_extras = [f"Today's date: {dt.now().strftime('%B %d %Y')}."]
@@ -277,5 +284,33 @@ async def on_message(new_msg):
 async def main():
     await discord_client.start(cfg["bot_token"])
 
+def resolve_config_location(new_msg,config_node):
+    # if the channel has a channel-specific prompt, then use that, otherwise use the category-specific prompt if it exists, otherwise use the default system prompt
+    # note: If the user creates a thread in the channel, then new_msg.channel.parent_id will reflect the overall channel ID 
+    channel = new_msg.channel
+    channel_id = channel.id
+    parent_channel_id = getattr(new_msg.channel,'parent_id',None)
+    category_id = getattr(new_msg.channel, 'category_id', None)
+    return (
+            config_node.get(channel_id) or #in channel
+            config_node.get(parent_channel_id) or #in thread in channel
+            config_node.get(category_id) or #in category
+            config_node.get('default') #default
+            )
+def resolve_config_user(new_msg,config_node):
+    # if the channel has a channel-specific prompt, then use that, otherwise use the category-specific prompt if it exists, otherwise use the default system prompt
+    # note: If the user creates a thread in the channel, then new_msg.channel.parent_id will reflect the overall channel ID 
+    user_id = new_msg.author.id
+    role_ids = [role.id for role in new_msg.author.roles]
+    result = []
+    if user_result := config_node.get(user_id):
+        result.append(user_result)
+    for role_id in role_ids:
+        if role_result := config_node.get(role_id):
+            result.append(role_result)
+    if len(result) == 0:
+        result.append(config_node.get('default'))
+    return result
 
 asyncio.run(main())
+
