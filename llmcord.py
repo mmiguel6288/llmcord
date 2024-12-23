@@ -139,7 +139,7 @@ async def on_message(new_msg):
 
                 curr_node.has_bad_attachments = len(curr_msg.attachments) > sum(len(att_list) for att_list in good_attachments.values())
 
-                curr_node.username = curr_msg.author.username
+                curr_node.username = getattr(curr_msg.author,'display_name',None)
 
                 try:
                     if (
@@ -171,13 +171,18 @@ async def on_message(new_msg):
                 message = dict(content=content, role=curr_node.role)
                 if accept_usernames and curr_node.user_id != None:
                     message["name"] = str(curr_node.user_id)
-                elif curr_node.user_id != None:
-                    message['text'] = curr_node.username+':\n'+message['text']
-
-
-
-
-
+                elif curr_node.username is not None:
+                    if isinstance(message['content'],str):
+                        # logging.info(f'Message {message}')
+                        message['content'] = '[From:'+curr_node.username+']\n'+message['content']
+                        # logging.info(f'Inserted username {curr_node.username}: {message}')
+                    else:
+                        if 'text' in message['content'][0]:
+                            # logging.info(f'Messageg content 0 keys: {message["content"][0].keys()}')
+                            message['content'][0]['text'] = '[From:'+curr_node.username+']\n'+message['content'][0]['text']
+                            # logging.info(f'Inserted username {curr_node.username}: {message["content"][0]}')
+                        else:
+                            message['content'].insert(0,dict(type='text',text='[From:'+curr_node.username+']'))
 
                 messages.append(message)
 
@@ -304,9 +309,11 @@ def resolve_config_user(new_msg,config_node):
     role_ids = [role.id for role in new_msg.author.roles]
     result = []
     if user_result := config_node.get(user_id):
+        logging.info(f'User config: {user_id}')
         result.append(user_result)
     for role_id in role_ids:
         if role_result := config_node.get(role_id):
+            logging.info(f'Role config: {role_id}')
             result.append(role_result)
     if len(result) == 0:
         result.append(config_node.get('default'))
