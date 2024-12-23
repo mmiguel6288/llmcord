@@ -29,6 +29,8 @@ EDIT_DELAY_SECONDS = 1
 
 MAX_MESSAGE_NODES = 100
 
+PRINT_MODEL = True
+
 
 def get_config(filename="config.yaml"):
     with open(filename, "r") as file:
@@ -175,14 +177,15 @@ async def on_message(new_msg):
                     if isinstance(message['content'],str):
                         # logging.info(f'Message {message}')
                         message['content'] = '[From:'+curr_node.username+']\n'+message['content']
-                        # logging.info(f'Inserted username {curr_node.username}: {message}')
+                        logging.info(f'Inserted username {curr_node.username}: {message}')
                     else:
                         if 'text' in message['content'][0]:
-                            # logging.info(f'Messageg content 0 keys: {message["content"][0].keys()}')
+                            # logging.info(f'Message content 0 keys: {message["content"][0].keys()}')
                             message['content'][0]['text'] = '[From:'+curr_node.username+']\n'+message['content'][0]['text']
-                            # logging.info(f'Inserted username {curr_node.username}: {message["content"][0]}')
+                            logging.info(f'Inserted username {curr_node.username} for first message of {len(message["content"])}')
                         else:
                             message['content'].insert(0,dict(type='text',text='[From:'+curr_node.username+']'))
+                            logging.info(f'Inserted username {curr_node.username} as new message of {len(message["content"])}')
 
                 messages.append(message)
 
@@ -232,7 +235,10 @@ async def on_message(new_msg):
 
                 if response_contents or prev_content:
                     if response_contents == [] or len(response_contents[-1] + prev_content) > max_message_length:
-                        response_contents.append("")
+                        if PRINT_MODEL:
+                            response_contents.append(f"[model={model}]\n")
+                        else:
+                            response_contents.append('')
 
                         if not use_plain_responses:
                             embed = discord.Embed(description=(prev_content + STREAMING_INDICATOR), color=EMBED_COLOR_INCOMPLETE)
