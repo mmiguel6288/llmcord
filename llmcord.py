@@ -211,6 +211,8 @@ async def on_message(new_msg):
         system_prompt_extras = [f"Today's date: {dt.now().strftime('%B %d %Y')}."]
         if accept_usernames:
             system_prompt_extras.append("User's names are their Discord IDs and should be typed as '<@ID>'.")
+        else:
+            system_prompt_extras.append(f"Your discord mention/handle is {discord_client.user.mention} and if you see this, you are being directly addressed. Messages from users are automatically pre-pended with a [From:<user_mention>] behind the scenes to provide you with additional context.")
 
         full_system_prompt = dict(role="system", content="\n".join([system_prompt] + system_prompt_extras))
         messages.append(full_system_prompt)
