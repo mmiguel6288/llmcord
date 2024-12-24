@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime as dt
 import logging
 from typing import Literal, Optional
+import re
 
 import discord
 import httpx
@@ -171,21 +172,35 @@ async def on_message(new_msg):
 
             if content != "":
                 message = dict(content=content, role=curr_node.role)
+                if curr_node.username == discord_client.user.display_name:
+                    if isinstance(message['content'],str):
+                        # logging.info(f'message["content"]: {message["content"]}')
+                        message['content'] = re.sub('^\\[model=[^\\]]+\\]\n','',message['content'])
+                        # pattern = f'^\\[From:{discord_client.user.display_name}\\]\n'
+                        # logging.info(f'pattern: {pattern}')
+                        # message['content'] = re.sub(pattern,'',message['content'])
+                    else:
+                        if 'text' in message['content'][0]:
+                            # logging.info(f'message["content"][0]["text"]: {message["content"][0]["text"]}')
+                            message['content'][0]['text'] = re.sub('^\\[model=[a-zA-Z_/0-9]+\\]\n','',message['content'][0]['text'])
+                            # message['content'][0]['text'] = re.sub(f'^\\[From:{discord_client.user.mention}\\]\n','',message['content'][0]['text'])
+
                 if accept_usernames and curr_node.user_id != None:
                     message["name"] = str(curr_node.user_id)
-                elif curr_node.username is not None:
+                elif curr_node.username is not None and curr_node.username != discord_client.user.display_name:
                     if isinstance(message['content'],str):
                         # logging.info(f'Message {message}')
                         message['content'] = '[From:'+curr_node.username+']\n'+message['content']
-                        logging.info(f'Inserted username {curr_node.username}: {message}')
+                        #logging.info(f'Inserted username {curr_node.username}: {message}')
+
                     else:
                         if 'text' in message['content'][0]:
                             # logging.info(f'Message content 0 keys: {message["content"][0].keys()}')
                             message['content'][0]['text'] = '[From:'+curr_node.username+']\n'+message['content'][0]['text']
-                            logging.info(f'Inserted username {curr_node.username} for first message of {len(message["content"])}')
+                            #logging.info(f'Inserted username {curr_node.username} for first message of {len(message["content"])}')
                         else:
                             message['content'].insert(0,dict(type='text',text='[From:'+curr_node.username+']'))
-                            logging.info(f'Inserted username {curr_node.username} as new message of {len(message["content"])}')
+                            #logging.info(f'Inserted username {curr_node.username} as new message of {len(message["content"])}')
 
                 messages.append(message)
 
@@ -317,11 +332,11 @@ def resolve_config_user(new_msg,config_node):
     role_ids = [role.id for role in new_msg.author.roles]
     result = []
     if user_result := config_node.get(user_id):
-        logging.info(f'User config: {user_id}')
+        #logging.info(f'User config: {user_id}')
         result.append(user_result)
     for role_id in role_ids:
         if role_result := config_node.get(role_id):
-            logging.info(f'Role config: {role_id}')
+            #logging.info(f'Role config: {role_id}')
             result.append(role_result)
     if len(result) == 0:
         result.append(config_node.get('default'))
