@@ -31,9 +31,8 @@ EDIT_DELAY_SECONDS = 1
 
 MAX_MESSAGE_NODES = 100
 
-PRINT_MODEL = True
+PROMPT_PATTERN = re.compile(r'<prompt>(.*?)</prompt>',re.DOTALL)
 
-model_pattern = re.compile('^\\[model=[^\\]]+\\]\n')
 
 def get_config(filename="config.yaml"):
     with open(filename, "r") as file:
@@ -96,9 +95,9 @@ async def on_message(new_msg):
     ):
         return
 
-    provider, model = resolve_config_user(new_msg,cfg["model"])[0].split("/",1)
-
-    provider_cfg = resolve_config_user(new_msg,cfg["providers"])[0]
+    #the resolving here is related to selecting models and api keys
+    provider, model = resolve_config_user(new_msg,cfg["model"])[0][0].split("/",1)
+    provider_cfg = resolve_config_user(new_msg,cfg["providers"])[0][0]
 
     base_url = provider_cfg[provider]["base_url"]
     api_key = provider_cfg[provider].get("api_key", "sk-no-key-required")
@@ -174,18 +173,18 @@ async def on_message(new_msg):
 
             if content != "":
                 message = dict(content=content, role=curr_node.role)
-                if curr_node.username == discord_client.user.display_name:
-                    if isinstance(message['content'],str):
-                        # logging.info(f'message["content"]: {message["content"]}')
-                        message['content'] = model_pattern.sub('',message['content'])
-                        # pattern = f'^\\[From:{discord_client.user.display_name}\\]\n'
-                        # logging.info(f'pattern: {pattern}')
-                        # message['content'] = re.sub(pattern,'',message['content'])
-                    else:
-                        if 'text' in message['content'][0]:
-                            # logging.info(f'message["content"][0]["text"]: {message["content"][0]["text"]}')
-                            message['content'][0]['text'] = model_pattern.sub('',message['content'][0]['text'])
-                            # message['content'][0]['text'] = re.sub(f'^\\[From:{discord_client.user.mention}\\]\n','',message['content'][0]['text'])
+                # if curr_node.username == discord_client.user.display_name:
+                #     if isinstance(message['content'],str):
+                #         # logging.info(f'message["content"]: {message["content"]}')
+                #         # message['content'] = model_pattern.sub('',message['content'])
+                #         # pattern = f'^\\[From:{discord_client.user.display_name}\\]\n'
+                #         # logging.info(f'pattern: {pattern}')
+                #         # message['content'] = re.sub(pattern,'',message['content'])
+                #     else:
+                #         if 'text' in message['content'][0]:
+                #             # logging.info(f'message["content"][0]["text"]: {message["content"][0]["text"]}')
+                #             message['content'][0]['text'] = model_pattern.sub('',message['content'][0]['text'])
+                #             # message['content'][0]['text'] = re.sub(f'^\\[From:{discord_client.user.mention}\\]\n','',message['content'][0]['text'])
 
                 if accept_usernames and curr_node.user_id != None:
                     message["name"] = str(curr_node.user_id)
@@ -219,12 +218,13 @@ async def on_message(new_msg):
 
     logging.info(f"Message received (user ID: {new_msg.author.id}, attachments: {len(new_msg.attachments)}, conversation length: {len(messages)}):\n{new_msg.content}")
 
-    system_prompt = resolve_config_location(new_msg,cfg.get('system_prompts',{}))
+    system_prompt,location_context = resolve_config_location(new_msg,cfg.get('system_prompts',{}))
     if system_prompt:
         system_prompt = [system_prompt]
     else:
         system_prompt = []
-    system_prompt.extend(resolve_config_user(new_msg,cfg.get('system_prompts',{})))
+    sps,user_context,role_context = resolve_config_user(new_msg,cfg.get('system_prompts',{}))
+    system_prompt.extend(sps)
     system_prompt = '\n'.join(system_prompt).strip()
 
     if system_prompt:
@@ -232,7 +232,8 @@ async def on_message(new_msg):
         if accept_usernames:
             system_prompt_extras.append("User's names are their Discord IDs and should be typed as '<@ID>'.")
         else:
-            system_prompt_extras.append(f"Your discord mention/handle is {discord_client.user.mention} and if you see this, you are being directly addressed. Messages from users are automatically pre-pended with a [From:<user_mention>] behind the scenes to provide you with additional context.")
+            system_prompt_extras.append(f"Your Discord display name {discord_client.user.display_name} and your Discord mention is @{discord_client.user.mention}. If you see this, you are being directly addressed. Messages from users are automatically pre-pended with a [From:<user_mention>] behind the scenes to provide you with additional context.")
+            #logging.info(system_prompt_extras)
 
         full_system_prompt = dict(role="system", content="\n".join([system_prompt] + system_prompt_extras))
         messages.append(full_system_prompt)
@@ -252,13 +253,25 @@ async def on_message(new_msg):
 
                 if response_contents or prev_content:
                     if response_contents == [] or len(response_contents[-1] + prev_content) > max_message_length:
-                        if PRINT_MODEL:
-                            response_contents.append(f"[model={model}]\n")
-                        else:
-                            response_contents.append('')
+                        # if PRINT_MODEL:
+                        #     response_contents.append(f"[model={model}]\n")
+                        # else:
+                        #     response_contents.append('')
+                        response_contents.append('')
 
                         if not use_plain_responses:
                             embed = discord.Embed(description=(prev_content + STREAMING_INDICATOR), color=EMBED_COLOR_INCOMPLETE)
+                            footers = ['─'*60,f'Model: {model}']
+                            contexts = []
+                            if location_context is not None:
+                                contexts.append(location_context)
+                            if user_context:
+                                contexts.append('User')
+                            if role_context:
+                                contexts.append('Role')
+                            if len(contexts) > 0:
+                                footers.append('Context: ' + ' • '.join(contexts))
+                            embed.set_footer(text='\n'.join(footers))#, style=discord.FooterStyle(color=discord.Color.light_grey()))
                             for warning in sorted(user_warnings):
                                 embed.add_field(name=warning, value="", inline=False)
 
@@ -327,28 +340,44 @@ def resolve_config_location(new_msg,config_node):
     channel_id = channel.id
     parent_channel_id = getattr(new_msg.channel,'parent_id',None)
     category_id = getattr(new_msg.channel, 'category_id', None)
-    return (
-            config_node.get(channel_id) or #in channel
-            config_node.get(parent_channel_id) or #in thread in channel
-            config_node.get(category_id) or #in category
-            config_node.get('default') #default
-            )
+
+    if isinstance(channel,discord.Thread):
+        topic = channel.parent.topic
+    else:
+        topic = channel.topic
+
+    if topic:
+        if result := PROMPT_PATTERN.search(topic):
+            return (result.group(1).strip(),'Channel Topic')
+
+    if result := config_node.get(channel_id) or config_node.get(parent_channel_id):
+        return (result,'Channel Config')
+    if result := config_node.get(category_id):
+        return (result,'Category Config')
+    if result := config_node.get('default'):
+        return (result,'Default')
+    return (None,None)
+
 def resolve_config_user(new_msg,config_node):
     # if the channel has a channel-specific prompt, then use that, otherwise use the category-specific prompt if it exists, otherwise use the default system prompt
     # note: If the user creates a thread in the channel, then new_msg.channel.parent_id will reflect the overall channel ID 
     user_id = new_msg.author.id
     role_ids = [role.id for role in new_msg.author.roles]
     result = []
+    user_context = False
+    role_context = False
     if user_result := config_node.get(user_id):
         #logging.info(f'User config: {user_id}')
         result.append(user_result)
+        user_context = True
     for role_id in role_ids:
         if role_result := config_node.get(role_id):
             #logging.info(f'Role config: {role_id}')
             result.append(role_result)
+            role_context = True
     if len(result) == 0:
         result.append(config_node.get('default'))
-    return result
+    return result, user_context, role_context
 
 asyncio.run(main())
 
