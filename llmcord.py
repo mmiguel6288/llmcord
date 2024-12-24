@@ -218,7 +218,7 @@ async def on_message(new_msg):
 
     logging.info(f"Message received (user ID: {new_msg.author.id}, attachments: {len(new_msg.attachments)}, conversation length: {len(messages)}):\n{new_msg.content}")
 
-    system_prompt,location_context = resolve_config_location(new_msg,cfg.get('system_prompts',{}))
+    system_prompt,location_context = (await resolve_config_location(new_msg,cfg.get('system_prompts',{})))
     if system_prompt:
         system_prompt = [system_prompt]
     else:
@@ -333,10 +333,28 @@ async def on_message(new_msg):
 async def main():
     await discord_client.start(cfg["bot_token"])
 
-def resolve_config_location(new_msg,config_node):
+async def resolve_config_location(new_msg,config_node):
     # if the channel has a channel-specific prompt, then use that, otherwise use the category-specific prompt if it exists, otherwise use the default system prompt
     # note: If the user creates a thread in the channel, then new_msg.channel.parent_id will reflect the overall channel ID 
     channel = new_msg.channel
+
+
+    if system_prompt_thread := discord.utils.get(channel.threads,name='system-prompt'):
+        async for message in system_prompt_thread.history(limit=1):
+
+            if content := message.content.strip():
+                total_content = [content]
+            else:
+                total_content = []
+
+            for att in message.attachments:
+                try:
+                    content = (await att.read()).decode('utf-8',errors='replace')
+                    total_content.append(content.strip())
+                except Exception as e:
+                    logging.error(f'Failed to read attachment {att.filename}: {e}')
+            return ('\n'.join(total_content),'Prompt Thread')
+
     channel_id = channel.id
     parent_channel_id = getattr(new_msg.channel,'parent_id',None)
     category_id = getattr(new_msg.channel, 'category_id', None)
