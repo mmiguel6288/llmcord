@@ -5,6 +5,7 @@ from datetime import datetime as dt
 import logging
 from typing import Literal, Optional
 import re
+from collections import OrderedDict
 
 import discord
 import httpx
@@ -32,6 +33,7 @@ MAX_MESSAGE_NODES = 100
 
 PRINT_MODEL = True
 
+model_pattern = re.compile('^\\[model=[^\\]]+\\]\n')
 
 def get_config(filename="config.yaml"):
     with open(filename, "r") as file:
@@ -50,7 +52,7 @@ discord_client = discord.Client(intents=intents, activity=activity)
 
 httpx_client = httpx.AsyncClient()
 
-msg_nodes = {}
+msg_nodes = OrderedDict()
 last_task_time = None
 
 
@@ -175,14 +177,14 @@ async def on_message(new_msg):
                 if curr_node.username == discord_client.user.display_name:
                     if isinstance(message['content'],str):
                         # logging.info(f'message["content"]: {message["content"]}')
-                        message['content'] = re.sub('^\\[model=[^\\]]+\\]\n','',message['content'])
+                        message['content'] = model_pattern.sub('',message['content'])
                         # pattern = f'^\\[From:{discord_client.user.display_name}\\]\n'
                         # logging.info(f'pattern: {pattern}')
                         # message['content'] = re.sub(pattern,'',message['content'])
                     else:
                         if 'text' in message['content'][0]:
                             # logging.info(f'message["content"][0]["text"]: {message["content"][0]["text"]}')
-                            message['content'][0]['text'] = re.sub('^\\[model=[a-zA-Z_/0-9]+\\]\n','',message['content'][0]['text'])
+                            message['content'][0]['text'] = model_pattern.sub('',message['content'][0]['text'])
                             # message['content'][0]['text'] = re.sub(f'^\\[From:{discord_client.user.mention}\\]\n','',message['content'][0]['text'])
 
                 if accept_usernames and curr_node.user_id != None:
@@ -304,9 +306,15 @@ async def on_message(new_msg):
 
     # Delete oldest MsgNodes (lowest message IDs) from the cache
     if (num_nodes := len(msg_nodes)) > MAX_MESSAGE_NODES:
-        for msg_id in sorted(msg_nodes.keys())[: num_nodes - MAX_MESSAGE_NODES]:
-            async with msg_nodes.setdefault(msg_id, MsgNode()).lock:
-                msg_nodes.pop(msg_id, None)
+        remove_count= num_nodes - MAX_MESSAGE_NODES
+        to_remove = list(msg_nodes.keys())[:remove_count]
+        
+        for msg_id in to_remove:
+            node = msg_nodes.get(msg_id)
+            if node:
+                async with node.lock:
+                    msg_nodes.pop(msg_id, None)
+
 
 
 async def main():
