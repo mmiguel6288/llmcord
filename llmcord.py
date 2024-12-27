@@ -243,6 +243,7 @@ async def on_message(new_msg):
     response_contents = []
     prev_chunk = None
     edit_task = None
+    new_codeblock = False
 
     kwargs = dict(model=model, messages=messages[::-1], stream=True, extra_body=cfg["extra_api_parameters"])
     try:
@@ -252,22 +253,17 @@ async def on_message(new_msg):
                 curr_content = curr_chunk.choices[0].delta.content or ""
 
                 if response_contents or prev_content:
+                    codeblock_end_buffer = len('```\n')
+                    effective_max_message_length = max_message_length - codeblock_end_buffer
+                    
 
-                    # if response_contents == [] or len(response_contents[-1] + prev_content) > max_message_length:
-                    if response_contents == []:
-                        # if PRINT_MODEL:
-                        #     response_contents.append(f"[model={model}]\n")
-                        # else:
-                        #     response_contents.append('')
-                        response_contents.append('')
-
-                        if len(response_contents[-1] + prev_content) > max_message_length:
-                            chunks = split_long_message(response_contents[-1] + prev_content, max_message_length)
-                            response_contents[-1] = chunks[0]
-                            response_contents.extend(chunks[1:])
-
-                            
-
+                    
+                    if response_contents == [] or len(rcp := response_contents[-1] + prev_content) > effective_max_message_length:
+                        if len(response_contents) > 0 and len(rcp) > effective_max_message_length and new_codeblock:
+                            response_contents.append('```\n')
+                        else:
+                            response_contents.append('')
+                    
                         if not use_plain_responses:
                             embed = discord.Embed(description=(prev_content + STREAMING_INDICATOR), color=EMBED_COLOR_INCOMPLETE)
                             footers = ['─'*60,f'Model: {model}']
@@ -297,9 +293,16 @@ async def on_message(new_msg):
                         finish_reason = curr_chunk.choices[0].finish_reason
 
                         ready_to_edit: bool = (edit_task == None or edit_task.done()) and dt.now().timestamp() - last_task_time >= EDIT_DELAY_SECONDS
-                        msg_split_incoming: bool = len(response_contents[-1] + curr_content) > max_message_length
+                        msg_split_incoming: bool = len(response_contents[-1] + curr_content) > effective_max_message_length
                         is_final_edit: bool = finish_reason != None or msg_split_incoming
                         is_good_finish: bool = finish_reason != None and any(finish_reason.lower() == x for x in ("stop", "end_turn"))
+
+                        new_codeblock = False
+                        if msg_split_incoming:
+                            if (response_contents[-1].count('```') % 2) == 1:
+                                response_contents[-1] += '```\n'
+                                new_codeblock = True
+
 
                         if ready_to_edit or is_final_edit:
                             if edit_task != None:
