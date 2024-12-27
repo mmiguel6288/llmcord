@@ -228,7 +228,7 @@ async def on_message(new_msg):
     system_prompt = '\n'.join(system_prompt).strip()
 
     if system_prompt:
-        system_prompt_extras = [f"Today's date: {dt.now().strftime('%B %d %Y')}."]
+        system_prompt_extras = [f"Current time: {dt.now().strftime('%B %d, %Y %I:%M:%S %p %Z')}."]
         if accept_usernames:
             system_prompt_extras.append("User's names are their Discord IDs and should be typed as '<@ID>'.")
         else:
@@ -261,7 +261,7 @@ async def on_message(new_msg):
                         #     response_contents.append('')
                         response_contents.append('')
 
-                        if len(response_contents[-1] + prev_content > max_message_length):
+                        if len(response_contents[-1] + prev_content) > max_message_length:
                             chunks = split_long_message(response_contents[-1] + prev_content, max_message_length)
                             response_contents[-1] = chunks[0]
                             response_contents.extend(chunks[1:])
@@ -346,9 +346,12 @@ async def resolve_config_location(new_msg,config_node):
     # if the channel has a channel-specific prompt, then use that, otherwise use the category-specific prompt if it exists, otherwise use the default system prompt
     # note: If the user creates a thread in the channel, then new_msg.channel.parent_id will reflect the overall channel ID 
     channel = new_msg.channel
+    if isinstance(channel,discord.Thread):
+        threads = channel.parent.threads
+    else:
+        threads = channel.threads
 
-
-    if system_prompt_thread := discord.utils.get(channel.threads,name='system-prompt'):
+    if system_prompt_thread := discord.utils.get(threads,name='system-prompt'):
         async for message in system_prompt_thread.history(limit=1):
 
             if content := message.content.strip():
