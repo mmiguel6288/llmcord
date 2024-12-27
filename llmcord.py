@@ -252,12 +252,21 @@ async def on_message(new_msg):
                 curr_content = curr_chunk.choices[0].delta.content or ""
 
                 if response_contents or prev_content:
-                    if response_contents == [] or len(response_contents[-1] + prev_content) > max_message_length:
+
+                    # if response_contents == [] or len(response_contents[-1] + prev_content) > max_message_length:
+                    if response_contents == []:
                         # if PRINT_MODEL:
                         #     response_contents.append(f"[model={model}]\n")
                         # else:
                         #     response_contents.append('')
                         response_contents.append('')
+
+                        if len(response_contents[-1] + prev_content > max_message_length):
+                            chunks = split_long_message(response_contents[-1] + prev_content, max_message_length)
+                            response_contents[-1] = chunks[0]
+                            response_contents.extend(chunks[1:])
+
+                            
 
                         if not use_plain_responses:
                             embed = discord.Embed(description=(prev_content + STREAMING_INDICATOR), color=EMBED_COLOR_INCOMPLETE)
