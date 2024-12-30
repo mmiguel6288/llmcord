@@ -75,7 +75,7 @@ class MsgNode:
 
 @discord_client.event
 async def on_message(new_msg):
-    global msg_nodes, last_task_time, cfg
+    global msg_nodes, last_task_time
 
     is_dm: bool = new_msg.channel.type == discord.ChannelType.private
 
@@ -265,7 +265,8 @@ async def on_message(new_msg):
                     
                         if not use_plain_responses:
                             embed = discord.Embed(description=(prev_content + STREAMING_INDICATOR), color=EMBED_COLOR_INCOMPLETE)
-                            footers = ['─'*60,f'Model: {model}']
+                            #footers = ['─'*60,f'Model: {model}']
+                            footers = ['─'*60]
                             contexts = []
                             if location_context is not None:
                                 contexts.append(location_context)
@@ -275,6 +276,7 @@ async def on_message(new_msg):
                                 contexts.append('Role')
                             if len(contexts) > 0:
                                 footers.append('Context: ' + ' • '.join(contexts))
+                            embed.set_author(name=model)
                             embed.set_footer(text='\n'.join(footers))#, style=discord.FooterStyle(color=discord.Color.light_grey()))
                             for warning in sorted(user_warnings):
                                 embed.add_field(name=warning, value="", inline=False)
