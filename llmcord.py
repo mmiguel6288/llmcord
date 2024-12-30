@@ -352,9 +352,12 @@ async def resolve_config_location(new_msg,config_node):
     if isinstance(channel,discord.Thread):
         threads = channel.parent.threads
     else:
-        threads = channel.threads
+        if hasattr(channel,'threads'):
+            threads = channel.threads
+        else:
+            threads = None
 
-    if system_prompt_thread := discord.utils.get(threads,name='system-prompt'):
+    if threads is not None and (system_prompt_thread := discord.utils.get(threads,name='system-prompt')):
         async for message in system_prompt_thread.history(limit=1):
 
             if content := message.content.strip():
@@ -377,7 +380,10 @@ async def resolve_config_location(new_msg,config_node):
     if isinstance(channel,discord.Thread):
         topic = channel.parent.topic
     else:
-        topic = channel.topic
+        if hasattr(channel,'topic'):
+            topic = channel.topic
+        else:
+            topic = None
 
     if topic:
         if result := PROMPT_PATTERN.search(topic):
@@ -395,7 +401,10 @@ def resolve_config_user(new_msg,config_node):
     # if the channel has a channel-specific prompt, then use that, otherwise use the category-specific prompt if it exists, otherwise use the default system prompt
     # note: If the user creates a thread in the channel, then new_msg.channel.parent_id will reflect the overall channel ID 
     user_id = new_msg.author.id
-    role_ids = [role.id for role in new_msg.author.roles]
+    if hasattr(new_msg.author,'roles'):
+        role_ids = [role.id for role in new_msg.author.roles]
+    else:
+        role_ids = []
     result = []
     user_context = False
     role_context = False
