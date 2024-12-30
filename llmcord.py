@@ -75,14 +75,13 @@ class MsgNode:
 
 @discord_client.event
 async def on_message(new_msg):
-    global msg_nodes, last_task_time
+    global msg_nodes, last_task_time, cfg
 
     is_dm: bool = new_msg.channel.type == discord.ChannelType.private
 
     if new_msg.author.bot or new_msg.channel.type not in ALLOWED_CHANNEL_TYPES or (not is_dm and discord_client.user not in new_msg.mentions):
         return
 
-    cfg = get_config()
 
     allow_dms: bool = cfg["allow_dms"]
     allowed_channel_ids = cfg["allowed_channel_ids"]
