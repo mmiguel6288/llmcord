@@ -6,6 +6,7 @@ import logging
 from typing import Literal, Optional
 import re
 from collections import OrderedDict
+import json
 
 import discord
 import httpx
@@ -26,7 +27,12 @@ ALLOWED_CHANNEL_TYPES = (discord.ChannelType.text, discord.ChannelType.public_th
 EMBED_COLOR_COMPLETE = discord.Color.dark_green()
 EMBED_COLOR_INCOMPLETE = discord.Color.orange()
 
-STREAMING_INDICATOR = " ⚪"
+#STREAMING_INDICATOR = " ⚪"
+#STREAMING_INDICATOR = " 💭"
+# STREAMING_INDICATOR = " 💬"
+# STREAMING_INDICATOR = " 🤖"
+STREAMING_INDICATOR = " 🗣️"
+
 EDIT_DELAY_SECONDS = 1
 
 MAX_MESSAGE_NODES = 100
@@ -95,8 +101,14 @@ async def on_message(new_msg):
         return
 
     #the resolving here is related to selecting models and api keys
-    provider, model = resolve_config_user(new_msg,cfg["model"])[0][0].split("/",1)
-    provider_cfg = resolve_config_user(new_msg,cfg["providers"])[0][0]
+    provider, model = resolve_config_user(new_msg,cfg["model"],include_default=True)[0][0].split("/",1)
+    provider_cfg = resolve_config_user(new_msg,cfg["providers"],include_default=True)[0][0]
+    extra_body = dict(cfg['extra_api_parameters'])
+    extra_body.update(await get_param_thread(new_msg))
+    
+    if 'model' in extra_body:
+        model = extra_body['model']
+        logging.info(f'Changing model to {model}')
 
     base_url = provider_cfg[provider]["base_url"]
     api_key = provider_cfg[provider].get("api_key", "sk-no-key-required")
@@ -150,7 +162,7 @@ async def on_message(new_msg):
                         and discord_client.user.mention not in curr_msg.content
                         and (prev_msg_in_channel := ([m async for m in curr_msg.channel.history(before=curr_msg, limit=1)] or [None])[0])
                         and any(prev_msg_in_channel.type == type for type in (discord.MessageType.default, discord.MessageType.reply))
-                        and prev_msg_in_channel.author == (discord_client.user if curr_msg.channel.type == discord.ChannelType.private else curr_msg.author)
+                        and (prev_msg_in_channel.author == (discord_client.user if curr_msg.channel.type == discord.ChannelType.private else curr_msg.author) or any(str(reaction.emoji) == '⛓️' for reaction in curr_msg.reactions))
                     ):
                         curr_node.next_msg = prev_msg_in_channel
                     else:
@@ -244,7 +256,8 @@ async def on_message(new_msg):
     edit_task = None
     new_codeblock = False
 
-    kwargs = dict(model=model, messages=messages[::-1], stream=True, extra_body=cfg["extra_api_parameters"])
+
+    kwargs = dict(model=model, messages=messages[::-1], stream=True, extra_body=extra_body)
     try:
         async with new_msg.channel.typing():
             async for curr_chunk in await openai_client.chat.completions.create(**kwargs):
@@ -346,6 +359,35 @@ async def on_message(new_msg):
 async def main():
     await discord_client.start(cfg["bot_token"])
 
+async def get_param_thread(new_msg):
+    channel = new_msg.channel
+    if isinstance(channel,discord.Thread):
+        threads = channel.parent.threads
+    else:
+        if hasattr(channel,'threads'):
+            threads = channel.threads
+        else:
+            threads = None
+
+    params = {}
+    if threads is not None and (parameters_thread := discord.utils.get(threads,name='llm-parameters')):
+        async for message in parameters_thread.history(limit=1):
+            if content := message.content.strip():
+                try:
+                    params |=  json.loads(content)
+                except Exception as e:
+                    logging.error(f'Failed to read content of parameters thread: {e}')
+            else:
+                total_content = []
+
+            for att in message.attachments:
+                try:
+                    content = (await att.read()).decode('utf-8',errors='replace')
+                    params |=  json.loads(content.strip())
+                except Exception as e:
+                    logging.error(f'Failed to read attachment {att.filename}: {e}')
+    return param_safeguard(params)
+
 async def resolve_config_location(new_msg,config_node):
     # if the channel has a channel-specific prompt, then use that, otherwise use the category-specific prompt if it exists, otherwise use the default system prompt
     # note: If the user creates a thread in the channel, then new_msg.channel.parent_id will reflect the overall channel ID 
@@ -397,8 +439,14 @@ async def resolve_config_location(new_msg,config_node):
     if result := config_node.get('default'):
         return (result,'Default')
     return (None,None)
+def param_safeguard(params):
+    if 'temperature' in params:
+        if params['temperature'] > 1.6:
+            params['temperature'] = 1.6
+    return params
 
-def resolve_config_user(new_msg,config_node):
+
+def resolve_config_user(new_msg,config_node,include_default=False):
     # if the channel has a channel-specific prompt, then use that, otherwise use the category-specific prompt if it exists, otherwise use the default system prompt
     # note: If the user creates a thread in the channel, then new_msg.channel.parent_id will reflect the overall channel ID 
     user_id = new_msg.author.id
@@ -418,7 +466,7 @@ def resolve_config_user(new_msg,config_node):
             #logging.info(f'Role config: {role_id}')
             result.append(role_result)
             role_context = True
-    if len(result) == 0:
+    if include_default and len(result) == 0:
         result.append(config_node.get('default'))
     return result, user_context, role_context
 
